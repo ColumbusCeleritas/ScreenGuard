@@ -74,7 +74,4 @@ package metadata on 2026-11-01.
 
 ## Copyright line
 
-The copyright-holder line for ScreenGuard itself is added when the
-public repository is created under the project owner's account (the
-public host is GitHub; the account name was still to be provided when
-this file was written). Nothing in this file invents one.
+Copyright (C) 2026 Columbus Celeritas LLC
