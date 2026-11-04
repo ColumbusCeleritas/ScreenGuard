@@ -1,0 +1,19 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# v0.11.0: the 343 MB Falconsai weights are placed into the build tree by the
+# build machine (downloaded from HuggingFace + hash-verified there) and are
+# never committed to git or routed through the dev VM.
+app/src/main/assets/falconsai.onnx
+# Public repository: the NudeNet v0 classifier weights are distributed as a
+# release asset, not committed (both model files are fetched from the
+# v0.18.0 release and verified by SHA-256 — see the play branch README,
+# "Models").
+app/src/main/assets/classifier.onnx

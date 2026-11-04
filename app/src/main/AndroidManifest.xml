@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      PRIVACY BY CONSTRUCTION:
+      This app deliberately does NOT request android.permission.INTERNET.
+      Screenshots are analysed in memory on-device and never stored or transmitted.
+      The only log kept is: timestamp + foreground app package + detector class/score.
+    -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission"
+        xmlns:tools="http://schemas.android.com/tools" />
+
+    <!--
+      v0.12.1: used ONLY for the persistent status notification (shield
+      icon in the status bar while protection is on). Nothing is ever
+      sent anywhere — this grants visibility of our own notification,
+      nothing more. Protection is never gated on this permission.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ScreenGuard">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".LogActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ScoreGraphActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".CustomActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".UnlockActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".PhotoActivity"
+            android:exported="false" />
+
+        <!-- v0.13.0: the device-capability benchmark stage (see
+             BenchmarkActivity / GuardService's bench machine). -->
+        <activity
+            android:name=".BenchmarkActivity"
+            android:exported="false" />
+
+        <service
+            android:name=".GuardService"
+            android:exported="true"
+            android:label="ScreenGuard"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+    </application>
+</manifest>
