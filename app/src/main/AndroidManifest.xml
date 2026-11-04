@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      PRIVACY BY CONSTRUCTION:
+      This app deliberately does NOT request android.permission.INTERNET.
+      Screenshots are analysed in memory on-device and never stored or transmitted.
+      The only log kept is: timestamp + foreground app package + detector class/score.
+    -->
+    <!--
+      Play J1 fix (2026-11-01): QUERY_ALL_PACKAGES removed — the app does
+      not qualify for broad package visibility (its only use was resolving
+      the HOME/launcher package set, which Play policy names an invalid
+      use when a less broad method works). The <queries> intent signature
+      below grants exactly the visibility GuardService.refreshHomePackages
+      needs: activities matching ACTION_MAIN + CATEGORY_HOME.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+    </queries>
+
+    <!--
+      v0.12.1: used ONLY for the persistent status notification (shield
+      icon in the status bar while protection is on). Nothing is ever
+      sent anywhere — this grants visibility of our own notification,
+      nothing more. Protection is never gated on this permission.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ScreenGuard">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Play prominent disclosure for AccessibilityService use
+             (priority 5, 2026-10-31): first-run consent screen,
+             re-triggered from Home / Setup step 1 until accepted. -->
+        <activity
+            android:name=".DisclosureActivity"
+            android:exported="false" />
+
+        <!-- Play G3 remainder (2026-11-02): in-app privacy policy
+             text/link and open-source licences screen. -->
+        <activity
+            android:name=".TextInfoActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".LogActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".ScoreGraphActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".CustomActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".UnlockActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".PhotoActivity"
+            android:exported="false" />
+
+        <!-- v0.13.0: the device-capability benchmark stage (see
+             BenchmarkActivity / GuardService's bench machine). -->
+        <activity
+            android:name=".BenchmarkActivity"
+            android:exported="false" />
+
+        <service
+            android:name=".GuardService"
+            android:exported="true"
+            android:label="ScreenGuard"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+    </application>
+</manifest>
