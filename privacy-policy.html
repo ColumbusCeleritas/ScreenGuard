@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScreenGuard — Privacy Policy — Columbus Celeritas LLC</title>
+<meta name="description" content="The privacy policy for ScreenGuard, an on-device content guard for Android published by Columbus Celeritas LLC.">
+<style>
+  :root { --ink:#1c2430; --muted:#5a6572; --accent:#0f5e8c; --line:#e3e7ec; --bg:#ffffff; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Georgia, 'Times New Roman', serif; color:var(--ink); background:var(--bg); line-height:1.65; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+  header { border-bottom: 1px solid var(--line); padding: 18px 0; }
+  .brand { font-family: Helvetica, Arial, sans-serif; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: 15px; }
+  .brand span { color: var(--accent); }
+  .brand a { color: inherit; text-decoration: none; }
+  h1 { font-size: 32px; font-weight: normal; margin: 36px 0 6px; }
+  .meta { color: var(--muted); margin: 0 0 24px; }
+  h2 { font-family: Helvetica, Arial, sans-serif; font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 30px 0 10px; }
+  a { color: var(--accent); }
+  footer { border-top: 1px solid var(--line); margin-top: 36px; padding: 22px 0 40px; color: var(--muted); font-size: 14px; font-family: Helvetica, Arial, sans-serif; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <span class="brand"><a href="/">Columbus <span>Celeritas</span> LLC</a></span>
+  </div>
+</header>
+
+<div class="wrap">
+  <h1>ScreenGuard — Privacy Policy</h1>
+  <p class="meta">
+    Effective date: November 2, 2026<br>
+    Developer: Columbus Celeritas LLC<br>
+    Privacy contact: <a href="mailto:alejandro@columbusceleritas.com">alejandro@columbusceleritas.com</a>
+  </p>
+
+  <p>ScreenGuard is an on-device content guard. An adult installs and configures it to detect adult content shown on the device screen and block it. This policy describes exactly what the app accesses, what it does with it, and what it never does.</p>
+
+  <h2>What ScreenGuard accesses</h2>
+  <ul>
+    <li><strong>Screenshots of the device screen.</strong> With your explicit consent, given in the app's prominent disclosure before the feature can be enabled, ScreenGuard uses Android's Accessibility Service to capture screenshots of whatever is on the screen, at intervals, while protection is on. Screen content can include personal and sensitive information, and ScreenGuard treats it that way.</li>
+    <li><strong>The package name of the app in the foreground.</strong> Used to adjust how often screenshots are checked (for example, browsers and video apps are checked more often) and to record blocking events in the local log described below.</li>
+    <li><strong>Which apps provide the device's Home screen.</strong> Used so the launcher is handled correctly and is never blocked.</li>
+  </ul>
+
+  <h2>How that access is used — and its limits</h2>
+  <ul>
+    <li>Screenshots are analysed <strong>only on your device, in memory</strong>, by two machine-learning models stored on the device, to decide whether adult content is on screen. If it is, ScreenGuard covers the screen and, in some cases, returns to the Home screen.</li>
+    <li><strong>Screenshots are never saved, never stored, and never leave the device.</strong> ScreenGuard has no permission to access the internet and contains no code that sends data anywhere on its own.</li>
+    <li>ScreenGuard keeps one record on the device: a local event log containing the time of each check event, the foreground app's package name, and the detector's verdict and score. No screenshot, image, or screen text is ever written to this log. The log stays on the device, is visible to you in the app, and is deleted when you clear the app's data or uninstall it.</li>
+    <li>The app has a Share / Export log button. Only if you tap it does the event log (times, app package names and detector scores — never screenshots or screen content) leave the device, to the destination you choose. ScreenGuard never sends anything on its own.</li>
+    <li>Your settings (protection options you choose in the app) are stored only on the device.</li>
+  </ul>
+
+  <h2>What ScreenGuard does not do</h2>
+  <ul>
+    <li>No user accounts. No sign-up, no login.</li>
+    <li>No data collection for the developer: nothing you do in the app is sent to the developer or to anyone else.</li>
+    <li>No advertising, no analytics, no crash reporting, no third-party tracking.</li>
+    <li>No selling or sharing of data — there is no data transfer of any kind.</li>
+  </ul>
+
+  <h2>Permissions</h2>
+  <ul>
+    <li><strong>Accessibility Service</strong> — the core permission, described above. You grant it in Android Settings after the in-app disclosure and consent, and you can revoke it at any time in Android Settings.</li>
+    <li><strong>Notifications</strong> — used only to show ScreenGuard's own ongoing status notification while protection is on.</li>
+    <li><strong>Package visibility</strong> — used only to identify the foreground app's package name and the device's Home-screen apps, as described above.</li>
+  </ul>
+
+  <h2>Children</h2>
+  <p>ScreenGuard is intended for adults (18+). It is installed and configured by an adult — for their own use, or as a guard on a device the adult manages. It is not directed at children and creates no account or profile for any user of any age.</p>
+
+  <h2>Data retention and deletion</h2>
+  <p>Because nothing is transmitted, the developer holds no data about you and there is nothing to request deletion of from the developer. On-device records (the event log and your settings) are removed by clearing the app's storage or uninstalling the app.</p>
+
+  <h2>Open source</h2>
+  <p>ScreenGuard is free software, released under the GNU General Public License v3.0. The full licence texts and third-party notices for the on-device models are included inside the app.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>If this policy changes, the updated version will be posted at this address with a new effective date before the change takes effect in an app update.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about privacy: <a href="mailto:alejandro@columbusceleritas.com">alejandro@columbusceleritas.com</a></p>
+
+  <footer>
+    © 2026 Columbus Celeritas LLC · Spokane, Washington · <a href="/">Home</a>
+  </footer>
+</div>
+</body>
+</html>

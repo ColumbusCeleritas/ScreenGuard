@@ -43,6 +43,7 @@ GNU General Public License v3.0 (see `LICENSE`).
   verdict and score — never an image or screen text. You can read it in
   the app and erase it by clearing the app's data.
 - Privacy policy: https://columbusceleritas.com/privacy-policy/
+- Terms of service: https://columbusceleritas.com/terms-of-service/
 
 ## Models
 
