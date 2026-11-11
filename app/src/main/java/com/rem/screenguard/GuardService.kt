@@ -439,11 +439,24 @@ class GuardService : AccessibilityService() {
     // redefine the foreground surface). The call-surface scoping
     // leg of the live session hold reads it.
     @Volatile private var foregroundClass: String = ""
+    // v0.19.6 F3: the last class seen PER PACKAGE, from the same
+    // events. The single slot above is overwritten by EVERY
+    // non-own window-state event — a SystemUI transient during a
+    // call erased the call class and zeroed the arm streak
+    // (field 2026-11-10). The call-surface leg reads the
+    // per-package entry for the package it scopes; the global
+    // slot stays for the heartbeat's fgClass= sample.
+    private val lastClassByPkg = HashMap<String, String>()
     @Volatile private var running = false
     // v0.12.1: whether the status-bar shield notification is currently
     // posted. In-memory only; syncStatusNotification reconciles it
     // against the live permission state on every heartbeat.
     @Volatile private var statusNotifShown = false
+    // v0.19.5 (model-health surfacing, Option 1): the exact text the
+    // shield currently carries. syncStatusNotification re-posts when
+    // the health-derived text differs from this, so a model latch
+    // rewrites the shield instead of hiding under "Protection is on".
+    @Volatile private var statusNotifText: String? = null
     // v0.13.1: the "shield suppressed" line logs ONCE per service
     // start — the v0.13.0 code logged nothing in that state, so a
     // missing POST_NOTIFICATIONS grant was undiagnosable from the log
@@ -697,6 +710,18 @@ class GuardService : AccessibilityService() {
     private var callFlipPkg: String? = null
     private var callFlipClass: String? = null
     private var audioWasInCall = false
+    // v0.19.6 F4: the PiP arm — a package whose floating window
+    // was VISIBLE at the audio-flip tick (the call's PiP existed
+    // when the call began) and that has stayed continuously
+    // visible as a floating window since. [callPipPkg] is the
+    // flip-time candidate; [callPipStreak] counts its consecutive
+    // qualifying ticks toward CALLHOLD_ARM_CHECKS.
+    private var callPipPkg: String? = null
+    private var callPipStreak = 0
+    // v0.19.6 F2: the arm-miss line's throttle (last emit per
+    // package) — negative evidence for the hold's legs, capped at
+    // one line per package per minute.
+    private val callMissLogAt = HashMap<String, Long>()
     // ---- v0.14.0: window-stack judging state ----
     // One sampled app window. [pkg] is null when the window's root
     // resolves no package (D6: logged as ?@bounds, never judged).
@@ -913,7 +938,7 @@ class GuardService : AccessibilityService() {
         )
         // Never analyse: ourselves, system UI, settings, permission dialogs.
         private val SKIP_EXACT = setOf(
-            "com.rem.screenguard", "com.android.systemui", "com.android.settings",
+            "com.columbusceleritas.screenguard", "com.android.systemui", "com.android.settings",
             "com.google.android.permissioncontroller", "com.android.permissioncontroller"
         )
         // v0.7.1 (Alejandro): the launcher and Settings are NEVER checked —
@@ -956,6 +981,54 @@ class GuardService : AccessibilityService() {
         private const val SECURE_BLACK_FRAC = 0.97
         private const val SECURE_BLACK_LUM = 10
         private const val SECURE_MEAN_LUM = 8.0
+        // v0.19.0-sideload (Nov 6 field report): a DARK page in a
+        // NORMAL Chrome window (X in dark mode) false-fired the
+        // incognito block — its interior luminance counted ~all cells
+        // <=10 with mean <=8, indistinguishable from the composited
+        // incognito hole by luminance alone. The secure test now runs
+        // on the browser WINDOW's own crop (geometry from the stack
+        // snapshot), not the full frame, and adds three
+        // corroborations, each a pixel-exact property of the
+        // composited hole that no rendered page has:
+        //  (1) WINDOW GEOMETRY: FLAG_SECURE voids the whole window,
+        //      toolbar included — Chrome's incognito toolbar is part
+        //      of the protected surface and composites black with the
+        //      page. A NORMAL window always renders its toolbar (URL
+        //      text, tab count, icons) at the top of its own bounds,
+        //      dark theme or not, and its page header below that.
+        //      The thumb cells under the window are therefore tested,
+        //      not just the page interior (the v0.2.3 interior-only
+        //      region read straight past the toolbar evidence).
+        //  (2) ZERO-VARIANCE (purity): the hole is DIGITALLY pure
+        //      black — every cell of the window's test region (rows
+        //      2..22, cols 1..31 of the window crop) exactly 0, so
+        //      max == min == 0. A rendered page always emits some
+        //      pixel there: X dark mode's background composites at
+        //      >=1; text/media/toolbar glyphs push cells higher.
+        //      The outer frame keeps only a 1-cell margin (rounding
+        //      bleed) and the top 2 rows (the status-bar strip,
+        //      which renders even over a real hole).
+        //  (3) PERSISTENT EMPTINESS: with zero variance the hole
+        //      never animates. Enforced structurally: the secure
+        //      streak only advances when the PREVIOUS analysis also
+        //      passed the full test (see below), so one black flash
+        //      or a single frame of a dark video can never convict.
+        // The v0.1.7 interior/full-frame luminance bars above are
+        // unchanged and still gate entry to this test. The uniform
+        // bar below is a code constant (v0.15.1 ground-truth rule);
+        // the stored corroboration pref is deleted at start.
+        private const val SECURE_UNIFORM_CELL = 24
+        // v0.19.0-sideload: corroborating secure frames needed to
+        // convict. Code-only (the settings-era secure_frames_needed
+        // pref could be set to 1, where any single dark frame — one
+        // black video frame, one page-load flash — convicts); stored
+        // key deleted at service start like the QUAR keys.
+        // Raised 2 -> 4 on 2026-11-06 (Alejandro's call): a fullscreen
+        // black video passes every per-frame corroboration (its window
+        // is the whole screen), so the streak bar is the protection.
+        // Four consecutive corroborated analyses (~4 s at the
+        // suspicion cadence) before a secure-window conviction.
+        private const val SECURE_FRAMES_NEEDED = 4
         // v0.8.0: the remaining corroboration count (secureFrames) is a
         // setting — adjustable in the app, no rebuild. The score BARS
         // are v0.11.0 named constants below: with one model there is
@@ -1303,6 +1376,23 @@ class GuardService : AccessibilityService() {
         }
     }
 
+    /**
+     * v0.19.5 (model-health surfacing, Option 1 — design
+     * 2026-11-09): the shield's text as a pure function of current
+     * model health, with the log tag for the text-change line.
+     * FAL latched off outranks a CLS failure: a dark judge is
+     * reduced protection, a dead tripwire is only a degraded SUS
+     * trigger (Falconsai-only running is a supported mode). Both
+     * healthy yields the pre-v0.19.5 text byte-identically.
+     */
+    private fun statusShieldText(): Pair<String, String> = when {
+        falLatchedOff ->
+            "Protection reduced — scene model off. Tap to see why." to "reduced (FAL latched)"
+        clsFailReason != null ->
+            "Protection is on — tripwire model unavailable" to "tripwire (CLS unavailable)"
+        else -> "Protection is on" to "on"
+    }
+
     private fun syncStatusNotification() {
         val nm = try {
             getSystemService(NotificationManager::class.java)
@@ -1313,7 +1403,13 @@ class GuardService : AccessibilityService() {
         val allowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         if (running && allowed) {
-            if (statusNotifShown) return
+            // v0.19.5 (model-health surfacing, Option 1): the text is
+            // a pure function of model health (see statusShieldText)
+            // and the shield re-posts whenever that text changes —
+            // the early return now requires the SAME text, not just
+            // an already-shown shield.
+            val (text, tag) = statusShieldText()
+            if (statusNotifShown && statusNotifText == text) return
             try {
                 ensureStatusChannel()
                 val tap = PendingIntent.getActivity(
@@ -1325,14 +1421,21 @@ class GuardService : AccessibilityService() {
                 val notif = Notification.Builder(this, STATUS_CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_stat_shield)
                     .setContentTitle("ScreenGuard")
-                    .setContentText("Protection is on")
+                    .setContentText(text)
                     .setOngoing(true)
                     .setShowWhen(false)
                     .setContentIntent(tap)
                     .build()
                 nm.notify(STATUS_NOTIFICATION_ID, notif)
+                val firstPost = !statusNotifShown
                 statusNotifShown = true
-                DebugLog.log(this, "STATUS shield posted (protection on)")
+                if (statusNotifText != text) {
+                    statusNotifText = text
+                    DebugLog.log(this, "STATUS shield text -> $tag")
+                }
+                if (firstPost) {
+                    DebugLog.log(this, if (tag == "on") "STATUS shield posted (protection on)" else "STATUS shield posted ($tag)")
+                }
             } catch (t: Throwable) {
                 failLog("other", "status notif post ${t.javaClass.simpleName}: ${t.message}")
             }
@@ -1343,6 +1446,7 @@ class GuardService : AccessibilityService() {
                 failLog("other", "status notif cancel ${t.javaClass.simpleName}: ${t.message}")
             }
             statusNotifShown = false
+            statusNotifText = null
             DebugLog.log(this, "STATUS shield removed (running=$running allowed=$allowed)")
         } else if (running && !allowed && !statusSuppressionLogged) {
             // v0.13.1: protection is ON but the shield cannot show —
@@ -1430,8 +1534,14 @@ class GuardService : AccessibilityService() {
             .remove("quar_base_s")
             .remove("quar_max_s")
             .remove("quar_reset_min")
+            // v0.19.0-sideload: the secure/incognito corroboration is
+            // code ground truth too — a stored secure_frames_needed of
+            // 1 let any single dark frame convict (Nov 6 false-fire),
+            // and no stored value may veto the new thresholds.
+            .remove("secure_frames_needed")
             .apply()
         DebugLog.log(this, "QUAR ladder src=code base=10s steps=10/20/40/80/160/320/600 (stored values removed)")
+        DebugLog.log(this, "SECURE bars src=code frames=$SECURE_FRAMES_NEEDED winPure0 uniformCell<=$SECURE_UNIFORM_CELL (stored secure_frames_needed removed)")
         // v0.13.0 PERF LOGGING (Alejandro's requirement): every log
         // from this phone states the device up front, so a log from
         // an unknown weaker phone identifies itself — manufacturer,
@@ -1561,7 +1671,10 @@ class GuardService : AccessibilityService() {
             // redefine what the foreground surface is.
             if (pkg != packageName) {
                 val cls = event.className?.toString()
-                if (cls != null) foregroundClass = cls
+                if (cls != null) {
+                    foregroundClass = cls
+                    lastClassByPkg[pkg] = cls // v0.19.6 F3
+                }
             }
         }
     }
@@ -1991,31 +2104,40 @@ class GuardService : AccessibilityService() {
     // surface) is accepted — it is held together with the call.
 
     /** Is the audio subsystem in a call mode right now? */
-    private fun audioInCall(): Boolean {
-        val am = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return false
-        val m = try { am.mode } catch (e: Exception) { return false }
-        return m == AudioManager.MODE_IN_COMMUNICATION || m == AudioManager.MODE_IN_CALL
+    private fun audioInCall(): Boolean = audioModeInCall(audioMode())
+
+    /** The raw AudioManager mode (v0.19.6 F2: read once per tick
+     *  and carried into the logs — before, the mode was read every
+     *  tick and logged nowhere, so a failed audio leg left no
+     *  negative evidence). -1 when the read itself fails. */
+    private fun audioMode(): Int {
+        val am = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return -1
+        return try { am.mode } catch (e: Exception) { -1 }
     }
 
-    /**
-     * The scoping legs for the FOREGROUND package: does the
-     * surface currently in front scope to a call surface? The
-     * activity leg reads the foreground activity class (call
-     * activities name themselves: voicecalling / videocalling /
-     * voip); the witness leg is the fallback — the audio mode
-     * flipped into a call mode while this exact package + class
-     * was in front, and that continuity still holds. Returns the
-     * CALLHOLD log's via string, or null when neither leg holds.
-     * Meaningful only for the foreground package (the class
-     * describes the foreground window); callers honour that.
-     */
-    private fun callSurfaceLegs(fgPkg: String): String? {
-        if (fgPkg.isBlank()) return null
-        val cls = foregroundClass
+    private fun audioModeInCall(m: Int): Boolean =
+        m == AudioManager.MODE_IN_COMMUNICATION || m == AudioManager.MODE_IN_CALL
+
+    /** The two surface legs for [pkg], judged on the package's
+     *  OWN last-seen class (v0.19.6 F3: [lastClassByPkg], never
+     *  the clobber-prone global slot): the ACTIVITY leg — the
+     *  class names a call surface; the WITNESS leg — the audio
+     *  mode flipped into a call mode while this exact package +
+     *  class was in front, and that continuity still holds.
+     *  Returns (activity, witness). */
+    private fun callLegsFor(pkg: String): Pair<Boolean, Boolean> {
+        if (pkg.isBlank()) return false to false
+        val cls = lastClassByPkg[pkg] ?: ""
         val low = cls.lowercase()
         val act = low.contains("calling") || low.contains("voip")
-        val wit = callFlipPkg != null && callFlipPkg == fgPkg &&
+        val wit = callFlipPkg != null && callFlipPkg == pkg &&
             !callFlipClass.isNullOrBlank() && cls == callFlipClass
+        return act to wit
+    }
+
+    /** The via string when either leg holds for [pkg], else null. */
+    private fun legsVia(pkg: String): String? {
+        val (act, wit) = callLegsFor(pkg)
         if (!act && !wit) return null
         return buildString {
             append("audio")
@@ -2024,11 +2146,33 @@ class GuardService : AccessibilityService() {
         }
     }
 
-    /** Is [pkg] the held package AND its call surface the
-     *  foreground content right now (audio still in a call mode,
-     *  scoping legs still holding)? The wholesale judging pause
-     *  keys on this — it is re-evaluated every tick, so the
-     *  pause lifts the moment the surface or the call ends. */
+    /**
+     * The scoping legs for a package: does its surface scope to
+     * a call surface? The activity leg reads the package's own
+     * last-seen activity class (v0.19.6 F3: per-package memory —
+     * call activities name themselves: voicecalling /
+     * videocalling / voip); the witness leg is the fallback — the
+     * audio mode flipped into a call mode while this exact
+     * package + class was in front, and that continuity still
+     * holds. Returns the CALLHOLD log's via string, or null when
+     * neither leg holds. Historically foreground-only (the class
+     * described the foreground window); F3's per-package memory
+     * makes the same question meaningful for a visible floating
+     * package too (F4) — the caller decides which packages it may
+     * ask about.
+     */
+    private fun callSurfaceLegs(fgPkg: String): String? = legsVia(fgPkg)
+
+    /** Is [pkg] the held package AND its call surface still
+     *  scoping to a call right now (audio still in a call mode,
+     *  scoping legs still holding)? Pre-v0.19.6 this also
+     *  required the surface to be the FOREGROUND content; the
+     *  wholesale judging pause still keys on foreground itself
+     *  (it checks callHoldPkg == effPkg alongside), so dropping
+     *  the foreground requirement here only widens the scout
+     *  stand-down to a held call floating over another app —
+     *  which is the F4 point. Re-evaluated every tick, so the
+     *  state lifts the moment the surface or the call ends. */
     private fun callSurfaceHeldNow(pkg: String): Boolean =
         callHoldPkg == pkg && audioInCall() && callSurfaceLegs(pkg) != null
 
@@ -2049,28 +2193,54 @@ class GuardService : AccessibilityService() {
 
     /**
      * The hold state machine, ridden on every tick (cheap: one
-     * audio-mode read + the event-fed class label — no captures).
-     * Arm: the audio mode is a call mode AND the foreground
-     * surface scopes to a call, for CALLHOLD_ARM_CHECKS
-     * consecutive ticks. Exit: CALLHOLD_EXIT_CHECKS consecutive
-     * ticks where the audio mode is back to normal OR the held
-     * package's surface is gone entirely (no window in the stack
-     * sample and not foreground — a floating call window keeps
-     * its package visible in the sample, so a PiP call never
-     * trips this leg; [visiblePkgs] null = stack read failed =
-     * unknown, never "gone").
+     * audio-mode read + the event-fed class labels — no
+     * captures). Arm: the audio mode is a call mode AND a surface
+     * scopes to a call, for CALLHOLD_ARM_CHECKS consecutive
+     * ticks. Two arm scopes (v0.19.6 F4): the FOREGROUND package
+     * (the original path), and a FLOATING package — one visible
+     * only as a small window over another app's fullscreen
+     * surface, but only when that package was already floating
+     * at the audio-flip tick (a PiP video player that merely
+     * happens to be up when some unrelated call-mode flip lands
+     * never qualifies: it was not there when the call began).
+     * [floatCand] is this tick's floating candidate (null when
+     * the stack read failed or no package qualifies); [wasFloatAtFlip]
+     * is the same candidate set sampled on the flip tick itself.
+     * Exit: CALLHOLD_EXIT_CHECKS consecutive ticks where the
+     * audio mode is back to normal OR the held package's surface
+     * is gone entirely (no window in the stack sample and not
+     * foreground — a floating call window keeps its package
+     * visible in the sample, so a PiP call never trips this leg;
+     * [visiblePkgs] null = stack read failed = unknown, never
+     * "gone").
      */
-    private fun evalCallHold(now: Long, fgPkg: String, visiblePkgs: Set<String>?) {
-        val inCall = audioInCall()
+    private fun evalCallHold(
+        now: Long, fgPkg: String, visiblePkgs: Set<String>?,
+        floatCand: Set<String>? = null, wasFloatAtFlip: Set<String>? = null
+    ) {
+        val mode = audioMode()
+        val inCall = audioModeInCall(mode)
         // Witness bookkeeping: the flip into a call mode records
-        // the surface in front at that moment; leaving call
-        // modes clears the record.
+        // the surface in front at that moment — and (F4) which
+        // packages were already floating then; leaving call
+        // modes clears both records.
         if (inCall && !audioWasInCall) {
             callFlipPkg = fgPkg.ifBlank { null }
-            callFlipClass = foregroundClass.ifBlank { null }
+            callFlipClass = (lastClassByPkg[fgPkg] ?: foregroundClass).ifBlank { null }
+            callPipPkg = wasFloatAtFlip?.firstOrNull()
+            callPipStreak = 0
+            // v0.19.6 F2: the flip is an event line — the mode,
+            // the surface in front, and the floating candidate
+            // are exactly what the 2026-11-10 log could not show.
+            DebugLog.log(
+                this,
+                "CALLHOLD flip mode=$mode pkg=$fgPkg class=${callFlipClass?.substringAfterLast('.') ?: "-"} pip=${callPipPkg ?: "-"}"
+            )
         } else if (!inCall) {
             callFlipPkg = null
             callFlipClass = null
+            callPipPkg = null
+            callPipStreak = 0
         }
         audioWasInCall = inCall
         val held = callHoldPkg
@@ -2087,9 +2257,42 @@ class GuardService : AccessibilityService() {
                     DebugLog.log(this, "CALLHOLD on pkg=$fgPkg via=$legs")
                     refreshOverlay()
                 }
-            } else {
-                callArmStreak = 0
+                return
             }
+            callArmStreak = 0
+            // v0.19.6 F4: the floating arm. The flip-time
+            // candidate only — its legs must hold AND it must
+            // still be floating now, CALLHOLD_ARM_CHECKS ticks
+            // in a row. A call that went PiP only AFTER the flip
+            // tick never enters here (the candidate was recorded
+            // at the flip); if it armed while foreground first,
+            // the exit path above keeps it held.
+            val pip = callPipPkg
+            if (inCall && pip != null && pip != fgPkg) {
+                val pipLegs = callSurfaceLegs(pip)
+                if (pipLegs != null && floatCand != null && pip in floatCand) {
+                    if (++callPipStreak >= CALLHOLD_ARM_CHECKS) {
+                        callHoldPkg = pip
+                        callHoldSinceMs = now
+                        callHoldVia = pipLegs
+                        callPipStreak = 0
+                        callExitStreak = 0
+                        resetStrikesAndPoints(pip)
+                        DebugLog.log(this, "CALLHOLD on pkg=$pip via=$pipLegs scope=pip")
+                        refreshOverlay()
+                    }
+                    return
+                }
+                callPipStreak = 0
+                logCallMiss(now, pip, mode, pipLegs = pipLegs)
+                return
+            }
+            // v0.19.6 F2: negative evidence for the foreground
+            // arm — the audio leg alone failed (its miss line
+            // needs no package context; the heartbeat's mode=
+            // field carries it), or the surface legs failed
+            // while the mode held.
+            if (inCall) logCallMiss(now, fgPkg, mode, fgLegs = callLegsFor(fgPkg))
             return
         }
         val surfaceGone = visiblePkgs != null && held !in visiblePkgs && fgPkg != held
@@ -2101,11 +2304,38 @@ class GuardService : AccessibilityService() {
                 callHoldVia = ""
                 callExitStreak = 0
                 callArmStreak = 0
+                callPipStreak = 0
                 refreshOverlay()
             }
         } else {
             callExitStreak = 0
         }
+    }
+
+    /**
+     * v0.19.6 F2: the CALLHOLD arm-miss line — throttled to once
+     * per package per minute, emitted only while the audio mode
+     * IS a call mode (the mode's own failure is carried by the
+     * ALIVE heartbeat's mode= field; this line exists for the
+     * case the 2026-11-10 log was blind to: mode held, legs
+     * failed, hold never armed, silence). fgLegs names the
+     * foreground package's two legs; pipLegs the floating
+     * candidate's via (null = its legs failed too).
+     */
+    private fun logCallMiss(
+        now: Long, pkg: String, mode: Int,
+        fgLegs: Pair<Boolean, Boolean>? = null, pipLegs: String? = null
+    ) {
+        if (pkg.isBlank()) return
+        val last = callMissLogAt[pkg] ?: 0L
+        if (now - last < 60_000L) return
+        callMissLogAt[pkg] = now
+        val line = if (fgLegs != null) {
+            "CALLHOLD arm-miss pkg=$pkg mode=$mode act=${fgLegs.first} wit=${fgLegs.second}"
+        } else {
+            "CALLHOLD arm-miss pkg=$pkg mode=$mode pipLegs=${pipLegs ?: "none"}"
+        }
+        DebugLog.log(this, line)
     }
 
     /**
@@ -2729,8 +2959,8 @@ class GuardService : AccessibilityService() {
                 continue
             }
             zodPassTimes.addLast(System.currentTimeMillis())
-            val v = falScore(fal, rb) // a failure failLogs + latches inside falScore; null counts as ERR/cold here
-            rb.recycle()
+            val v = falScore(fal, rb, owned = false) // a failure failLogs + latches inside falScore; null counts as ERR/cold here
+            if (rb !== bmp) rb.recycle() // v0.19.6 F1: a full-frame rung's crop IS the frame — never recycle it
             if (v == null) {
                 rungLog.add("${rung.name}:ERR")
                 continue
@@ -3655,7 +3885,31 @@ class GuardService : AccessibilityService() {
         // here, before any judging decision below (the wholesale
         // pause sits further down, past the heartbeat, so ALIVE
         // lines keep flowing through a held call).
-        evalCallHold(System.currentTimeMillis(), effPkg, stack?.appWindows?.mapNotNull { it.pkg }?.toSet())
+        // v0.19.6 F4: the floating candidates ride along — the
+        // packages visible ONLY as a small window while another
+        // package's window covers the fullscreen bar (the PiP
+        // shape; the same small + fullscreen tests the leg
+        // filter uses). The set is captured BEFORE this tick's
+        // filter runs next tick, so on the flip tick it names
+        // exactly what was floating when the call began.
+        val floatCand: Set<String>? = stack?.let { st ->
+            val dispArea = st.dispW.toLong() * st.dispH.coerceAtLeast(1)
+            val fsMin = (STACK_FULLSCREEN_FRAC * dispArea).toLong()
+            val hasFs = st.appWindows.any {
+                it.bounds.width().toLong() * it.bounds.height().toLong() >= fsMin
+            }
+            if (!hasFs) emptySet()
+            else st.appWindows.mapNotNull { w ->
+                val p = w.pkg
+                if (p != null && p != effPkg && w.exposed &&
+                    w.bounds.width().toLong() * w.bounds.height().toLong() < fsMin
+                ) p else null
+            }.toSet()
+        }
+        evalCallHold(
+            System.currentTimeMillis(), effPkg, stack?.appWindows?.mapNotNull { it.pkg }?.toSet(),
+            floatCand, floatCand
+        )
         // v0.13.0: benchmark housekeeping rides every tick (start /
         // cancel / phase ends) — phases are 20–30 s, far longer than
         // the poll, so per-tick precision is ample.
@@ -3734,6 +3988,15 @@ class GuardService : AccessibilityService() {
                     // — the heartbeat must show the sanity path is
                     // what is running, not a judging gap.
                     "stack=${stack?.judged?.size ?: -1} judged=${stack?.let { st -> st.topPkg ?: st.sanityPkg?.let { sp -> "sanity:$sp" } } ?: "-"}" +
+                    // v0.19.6 F2: the call hold's inputs ride the
+                    // heartbeat — the raw audio mode, the
+                    // foreground surface's short class, the held
+                    // package, and the arm streak. One ALIVE line
+                    // now discriminates the failure the 2026-11-10
+                    // log was blind to: mode stuck at 0 = the
+                    // audio leg; mode in a call mode with a
+                    // non-call class = the surface leg.
+                    " mode=${audioMode()} fgClass=${foregroundClass.substringAfterLast('.').ifBlank { "-" }} hold=${callHoldPkg ?: "-"} arm=$callArmStreak" +
                     // v0.14.4: a building blind streak is visible on
                     // the heartbeat BEFORE it can fire — the streak
                     // as of the previous evaluation (the governor
@@ -4828,13 +5091,13 @@ class GuardService : AccessibilityService() {
                 failLog("other", "region tracker ${e.javaClass.simpleName}: ${e.message} (region disabled, whole-frame continues)")
             }
         }
-        val falFull = falScore(fal, bmp)
+        val falFull = falScore(fal, bmp, owned = true)
         var falMsTotal = fal.lastMs
         var clsMsTotal = 0L
         var clsFull: Float? = null
         val cls = clsModel
         if (falFull != null && cls != null) {
-            clsFull = clsScore(cls, bmp)
+            clsFull = clsScore(cls, bmp, owned = true)
             if (clsFull != null) {
                 clsMsTotal += cls.lastMs
             }
@@ -4980,18 +5243,103 @@ class GuardService : AccessibilityService() {
             val iFrac = iBlack.toDouble() / iN
             val iLum = iSum.toDouble() / iN
             if (iFrac >= SECURE_BLACK_FRAC && iLum <= SECURE_MEAN_LUM) {
-                Prefs.bump(this, "secure_frames")
-                DebugLog.log(
-                    this,
-                    "SECURE frame pkg=$pkg iFrac=${"%.2f".format(iFrac)} iLum=${"%.0f".format(iLum)} " +
-                            "grid=[${grid4x4(thumb)}]"
-                )
-                bmp.recycle()
-                if (debugView != null) showOverlay(pkg, "$pkg\nFAL — secure frame\n(no pixels — incognito)")
-                handleSignal(pkg, secure = true, falFull = null, falCrop = null, fresh = true)
-                return
+                // v0.19.0-sideload: the luminance test alone cannot
+                // tell the composited incognito hole from a dark page
+                // in a normal window (Nov 6 field report: X dark mode
+                // in Chrome fired the incognito block). Corroborate on
+                // the browser WINDOW's own crop before the frame
+                // counts as secure (see the SECURE_* constants):
+                //  GEOMETRY — crop the window out of this frame using
+                //  the freshest stack snapshot's bounds for this
+                //  package (<=3 s old, the scout's freshness rule).
+                //  Unavailable (no snapshot, stale, no such window,
+                //  a sliver window) -> winPure/winUniform stay null
+                //  and the frame is NOT counted: geometry unknown
+                //  proves nothing either way.
+                //  PURITY — rows 2..22, cols 1..31 of the window
+                //  crop's own thumbnail ALL exactly 0: the hole voids
+                //  the toolbar with the page; a normal window renders
+                //  its toolbar (and a dark page its background and
+                //  header) inside its own bounds.
+                //  UNIFORMITY — every 4x4 summary cell of the window
+                //  thumbnail <= SECURE_UNIFORM_CELL.
+                var winPure: Boolean? = null
+                var winUniform: Boolean? = null
+                var winMaxCell = -1
+                var winNote = "no-geometry"
+                val sForWin = currentStack
+                val win = if (sForWin != null && System.currentTimeMillis() - sForWin.tsMs < 3_000L) {
+                    sForWin.appWindows.filter { it.pkg == pkg }.maxByOrNull { it.bounds.width().toLong() * it.bounds.height() }
+                } else null
+                if (win != null) {
+                    if (winAreaFrac(win, bmp) < 0.25) {
+                        winNote = "sliver-window"
+                    } else {
+                        val crop = cropToRect(bmp, win.bounds)
+                        if (crop == null) {
+                            winNote = "crop-failed"
+                        } else {
+                            val wThumb = thumbnail(crop)
+                            crop.recycle()
+                            winNote = "win=${win.bounds.width()}x${win.bounds.height()}"
+                            var p = true
+                            for (y in 2 until 23) {
+                                for (x in 1 until 31) {
+                                    if (wThumb[y * 32 + x] != 0) { p = false; break }
+                                }
+                                if (!p) break
+                            }
+                            winPure = p
+                            var mx = 0
+                            for (gy in 0 until 4) {
+                                for (gx in 0 until 4) {
+                                    var cSum = 0; var cN = 0
+                                    for (y in gy * 6 until (gy + 1) * 6) {
+                                        for (x in gx * 8 until (gx + 1) * 8) { cSum += wThumb[y * 32 + x]; cN++ }
+                                    }
+                                    val cell = cSum / cN
+                                    if (cell > mx) mx = cell
+                                }
+                            }
+                            winMaxCell = mx
+                            winUniform = mx <= SECURE_UNIFORM_CELL
+                        }
+                    }
+                }
+                if (winPure != true || winUniform != true) {
+                    DebugLog.log(
+                        this,
+                        "SECURE rejected pkg=$pkg iFrac=${"%.2f".format(iFrac)} iLum=${"%.0f".format(iLum)} " +
+                                "winPure=$winPure winUniform=$winUniform winMaxCell=$winMaxCell $winNote " +
+                                "grid=[${grid4x4(thumb)}] (not a proven composited secure hole — no streak)"
+                    )
+                    // fall through: the frame is analysed as content
+                } else {
+                    Prefs.bump(this, "secure_frames")
+                    DebugLog.log(
+                        this,
+                        "SECURE frame pkg=$pkg iFrac=${"%.2f".format(iFrac)} iLum=${"%.0f".format(iLum)} " +
+                                "winPure=true winUniform=true winMaxCell=$winMaxCell $winNote grid=[${grid4x4(thumb)}]"
+                    )
+                    bmp.recycle()
+                    if (debugView != null) showOverlay(pkg, "$pkg\nFAL — secure frame\n(no pixels — incognito)")
+                    // v0.19.0-sideload (3) PERSISTENT EMPTINESS: only
+                    // a corroborated run advances the streak. A secure
+                    // frame whose previous ANALYSIS did not also pass
+                    // restarts the streak at this frame — the hole is
+                    // permanently empty, so a genuine one always
+                    // re-passes on the next analysis; a lone black
+                    // flash never gets a second count.
+                    if (!securePrevPassed) instantSecureStreak = 0
+                    securePrevPassed = true
+                    handleSignal(pkg, secure = true, falFull = null, falCrop = null, fresh = true)
+                    return
+                }
             }
         }
+        // v0.19.0-sideload: any analysed browser frame that did NOT
+        // pass the full secure test breaks the corroborated run.
+        if (pkg in BROWSERS) securePrevPassed = false
         val diff = frameDiff(thumb)
         // v0.13.4: while a benchmark phase runs on our own surface,
         // its captures BYPASS the static gate below — every issued
@@ -5061,7 +5409,7 @@ class GuardService : AccessibilityService() {
             }
             bmp.recycle(); return
         }
-        val falFull = falScore(fal, bmp)
+        val falFull = falScore(fal, bmp, owned = true)
         val falFullMs = fal.lastMs
         var falCrop: Float? = null
         // v0.12.2 ZoD per-analysis state: the burst's best verdict
@@ -5096,7 +5444,7 @@ class GuardService : AccessibilityService() {
         var clsMsTotal = 0L
         val cls = clsModel
         if (falFull != null && cls != null) {
-            clsFull = clsScore(cls, bmp)
+            clsFull = clsScore(cls, bmp, owned = true)
             if (clsFull != null) {
                 clsMsTotal += cls.lastMs
                 DebugLog.log(this, "CLS pkg=$pkg src=full unsafe=${"%.2f".format(clsFull)} clsMs=${cls.lastMs}")
@@ -5123,7 +5471,7 @@ class GuardService : AccessibilityService() {
             val cropBmp = if (lockFrac != null) cropToFrac(bmp, lockFrac) else cropToRegion(bmp, regionBox)
             if (cropBmp != null) {
                 if (lockFrac != null) cropServedFromLock = true
-                falCrop = falScore(fal, cropBmp)
+                falCrop = falScore(fal, cropBmp, owned = false)
                 val falCropMs = fal.lastMs
                 falMsTotal += falCropMs
                 if (falCrop != null) {
@@ -5133,13 +5481,13 @@ class GuardService : AccessibilityService() {
                 // (before it is recycled) — its second and last pass
                 // this frame. No tiles, ever, for either model.
                 if (cls != null && clsFull != null) {
-                    clsCrop = clsScore(cls, cropBmp)
+                    clsCrop = clsScore(cls, cropBmp, owned = false)
                     if (clsCrop != null) {
                         clsMsTotal += cls.lastMs
                         DebugLog.log(this, "CLS pkg=$pkg src=crop unsafe=${"%.2f".format(clsCrop)} clsMs=${cls.lastMs}")
                     }
                 }
-                cropBmp.recycle()
+                if (cropBmp !== bmp) cropBmp.recycle() // v0.19.6 F1: a full-bounds crop IS the frame — never recycle it
             }
         }
         // v0.12.2 ZoD BURST (design §5.4): immediately after the
@@ -5581,9 +5929,9 @@ class GuardService : AccessibilityService() {
                 continue
             }
             zodPassTimes.addLast(System.currentTimeMillis())
-            val v = falScore(fal, rb)
+            val v = falScore(fal, rb, owned = false)
             spentMs += fal.lastMs
-            rb.recycle()
+            if (rb !== bmp) rb.recycle() // v0.19.6 F1: a full-frame rung's crop IS the frame — never recycle it
             if (v == null) {
                 rungLog.add("${rung.name}:ERR")
                 continue
@@ -5664,15 +6012,19 @@ class GuardService : AccessibilityService() {
             w.bounds
         }
         val crop = cropToRect(bmp, rect) ?: return null
-        val f = falScore(fal, crop)
+        val f = falScore(fal, crop, owned = false)
         val fMs = fal.lastMs
         var c: Float? = null
         var cMs = 0L
         if (cls != null && f != null) {
-            c = clsScore(cls, crop)
+            c = clsScore(cls, crop, owned = false)
             cMs = cls.lastMs
         }
-        crop.recycle()
+        // v0.19.6 F1: a full-bounds window crop IS the frame
+        // (createBitmap returns the source itself) — recycling it
+        // here killed the frame mid-analysis (field 2026-11-10:
+        // the FAIL region crop / FAIL zoom crop family).
+        if (crop !== bmp) crop.recycle()
         if (f != null) {
             DebugLog.log(
                 this,
@@ -5825,13 +6177,13 @@ class GuardService : AccessibilityService() {
         if (skipFull) {
             DebugLog.log(this, "PASS skip-full tiled=${(snap.tileFrac * 100).toInt()}% (D3)")
         } else {
-            falFull = falScore(fal, bmp)
+            falFull = falScore(fal, bmp, owned = true)
             falMsTotal += fal.lastMs
             elapsedMs += fal.lastMs
             if (falFull != null) {
                 DebugLog.log(this, "FAL pkg=$primaryPkg src=full nsfw=${"%.2f".format(falFull)} falMs=${fal.lastMs} (stack)")
                 if (cls != null) {
-                    clsFull = clsScore(cls, bmp)
+                    clsFull = clsScore(cls, bmp, owned = true)
                     if (clsFull != null) {
                         clsMsTotal += cls.lastMs
                         elapsedMs += cls.lastMs
@@ -5928,19 +6280,19 @@ class GuardService : AccessibilityService() {
             val motionWin = attributeMotion(snap, regionBox, bmp.width, bmp.height)
             val cropBmp = cropToRegion(bmp, regionBox)
             if (cropBmp != null) {
-                val fC = falScore(fal, cropBmp)
+                val fC = falScore(fal, cropBmp, owned = false)
                 val fCMs = fal.lastMs
                 falMsTotal += fCMs
                 elapsedMs += fCMs
                 var cC: Float? = null
                 if (cls != null && fC != null) {
-                    cC = clsScore(cls, cropBmp)
+                    cC = clsScore(cls, cropBmp, owned = false)
                     if (cC != null) {
                         clsMsTotal += cls.lastMs
                         elapsedMs += cls.lastMs
                     }
                 }
-                cropBmp.recycle()
+                if (cropBmp !== bmp) cropBmp.recycle() // v0.19.6 F1: a full-bounds crop IS the frame — never recycle it
                 if (fC != null) {
                     if (motionWin != null) {
                         DebugLog.log(this, "WIN PASS pkg=${motionWin.pkg} src=motion fal=${"%.2f".format(fC)} cls=${cC?.let { "%.2f".format(it) } ?: "-"}")
@@ -6220,6 +6572,7 @@ class GuardService : AccessibilityService() {
             if (gtPkg != null && gtPkg != pkg) closeGt("pkgchange")
             streakPkg = pkg
             instantSecureStreak = 0
+            securePrevPassed = false // v0.19.0-sideload: corroborated run belongs to its package
             if (pendingBlockPkg != pkg) {
                 pendingBlockPkg = null
                 pendingHits = 0
@@ -6238,7 +6591,10 @@ class GuardService : AccessibilityService() {
         if (secure) {
             if (fresh) noteSuspicion(pkg, "secure frame")
             instantSecureStreak++
-            val secureNeed = Prefs.secureFrames(this)
+            // v0.19.0-sideload: the corroboration count is code
+            // ground truth (SECURE_FRAMES_NEEDED); the settings-era
+            // secure_frames_needed pref is deleted at service start.
+            val secureNeed = SECURE_FRAMES_NEEDED
             DebugLog.log(this, "SECURE streak $instantSecureStreak/$secureNeed pkg=$pkg")
             if (instantSecureStreak >= secureNeed) {
                 instantSecureStreak = 0
@@ -7099,6 +7455,11 @@ class GuardService : AccessibilityService() {
     /** v0.3.0 instant mode: confirmation state for the current package. */
     private var streakPkg: String? = null
     private var instantSecureStreak = 0
+    /** v0.19.0-sideload: the previous ANALYSIS (not static replay) of
+     *  this package also passed the full secure test — the streak may
+     *  only advance on consecutive corroborated analyses (see the
+     *  SECURE check); any analysed frame that fails resets it. */
+    private var securePrevPassed = false
 
     /** v0.4.0: generation counter for screenshot captures — the watchdog
      *  bumps it to invalidate a wedged capture whose callback may still
@@ -7182,6 +7543,24 @@ class GuardService : AccessibilityService() {
      */
     private fun resolveFalLatch() {
         val vc = appVersionCode()
+        // v0.19.4 Part C — self-heal: a latch whose persisted failure
+        // is the recycled-source INPUT defect (stage "run", detail
+        // naming a recycled source) was never model corruption — a
+        // bitmap-lifecycle race in a previous build disarmed the
+        // judge over one bad frame. Clear the latch AND the failure
+        // record regardless of versionCode, state it to BOTH sinks,
+        // and let FAL arm below. Every other latch state behaves
+        // exactly as before.
+        if (Prefs.falLatchedVersion(this) >= 0 &&
+            Prefs.falFailStage(this) == "run" &&
+            Prefs.falFailDetail(this).contains("recycled")
+        ) {
+            Prefs.clearFalLatch(this)
+            Prefs.clearFalFailure(this)
+            val healLine = "FAL latch self-healed (recycled-source input defect)"
+            DebugLog.log(this, healLine)
+            Prefs.appendLog(this, ts() + " " + healLine)
+        }
         val latchedVc = Prefs.falLatchedVersion(this)
         when {
             latchedVc == vc && vc >= 0 -> falLatchedOff = true
@@ -7226,6 +7605,10 @@ class GuardService : AccessibilityService() {
         Prefs.latchFalOff(this, appVersionCode())
         DebugLog.log(this, "FAL latched OFF ($stage: $detail) — no scene grading; incognito/secure blocking still active")
         Prefs.appendLog(this, ts() + " FAL latched OFF ($stage: $detail) — no scene grading; incognito/secure blocking still active")
+        // v0.19.5: surface the latch on the shield NOW — a mid-run
+        // latch must not wait for the ~15 s heartbeat reconciliation
+        // while the shield still reads "Protection is on".
+        syncStatusNotification()
     }
 
     /**
@@ -7236,11 +7619,11 @@ class GuardService : AccessibilityService() {
      * FAL proven. A Java-level failure latches FAL off and returns
      * null.
      */
-    private fun falScore(model: FalconModel, bmp: Bitmap): Float? {
+    private fun falScore(model: FalconModel, bmp: Bitmap, owned: Boolean): Float? {
         analysisFalPasses++ // v0.14.0: per-analysis pass-set accounting (governor latency arm)
         if (!falFirstRunDone) Prefs.setFalAttempt(this, true)
         return try {
-            val s = model.score(bmp)
+            val s = model.score(bmp, owned)
             if (!falFirstRunDone) {
                 falFirstRunDone = true
                 Prefs.setFalProven(this)
@@ -7248,6 +7631,19 @@ class GuardService : AccessibilityService() {
             }
             s
         } catch (t: Throwable) {
+            // v0.19.4 Part B: a recycled-source IllegalArgumentException
+            // is an INPUT defect — the frame handed to the model was
+            // dead on arrival (a bitmap-lifecycle race), not model
+            // corruption. Log it, drop the frame, DO NOT latch and DO
+            // NOT persist a FAL failure. Part A makes this unreachable
+            // by construction; this is the belt behind the braces, so
+            // no future input path can ever disarm the judge this way
+            // again. Genuine model failures fall through to the latch
+            // below, unchanged.
+            if (t is IllegalArgumentException && (t.message?.contains("recycled") == true)) {
+                failLog("model", "fal run ${t.javaClass.simpleName}: ${t.message} — recycled input frame dropped, NOT latched (input defect)")
+                return null
+            }
             failLog("model", "fal run ${t.javaClass.simpleName}: ${t.message} — latching FAL off")
             latchFalOffNow("run", "${t.javaClass.simpleName}: ${t.message}")
             null
@@ -7265,10 +7661,10 @@ class GuardService : AccessibilityService() {
      * loading route ran reliably for weeks (v0.4.0–v0.10.10), and
      * nothing protective depends on it.
      */
-    private fun clsScore(model: SceneClassifier, bmp: Bitmap): Float? {
+    private fun clsScore(model: SceneClassifier, bmp: Bitmap, owned: Boolean): Float? {
         analysisClsPasses++ // v0.14.0: per-analysis pass-set accounting (governor latency arm)
         return try {
-            val s = model.classify(bmp)
+            val s = model.classify(bmp, owned)
             if (!clsFirstRunDone) {
                 clsFirstRunDone = true
                 DebugLog.log(this, "CLS first inference ok — tripwire live")

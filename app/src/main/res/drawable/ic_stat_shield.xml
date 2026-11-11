@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- v0.12.1: status-bar shield (notification small icon). Android tints
      small icons alpha-only, so this is one solid silhouette — the same
-     shield geometry as the launcher mark (ic_launcher_foreground),
+     shield geometry as the launcher mark,
      without the check cut-out so it stays legible at status-bar size. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"

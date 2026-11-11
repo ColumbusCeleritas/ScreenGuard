@@ -17,9 +17,10 @@ import android.widget.TextView
 
 /**
  * UI-polish Run 1 (Oct 28, 2026): shared design tokens + view helpers.
- * PRESENTATION ONLY — no behaviour, no prefs, no logic lives here.
- * Dark-first: deep ink-navy surfaces, one sky accent, rounded cards.
- * The light palette uses the same tokens on light surfaces.
+ * PRESENTATION ONLY — no behaviour lives here; the palette's one
+ * input is the stored theme choice (v0.19.0, see SgTheme).
+ * Dark-first: deep ink-navy surfaces, one accent (themed), rounded
+ * cards. The light palette uses the same tokens on light surfaces.
  */
 object SgUi {
 
@@ -34,33 +35,43 @@ object SgUi {
         (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
 
-    fun palette(ctx: Context): Palette = if (isDark(ctx)) Palette(
-        bg = Color.rgb(11, 18, 32),          // ink navy
-        surface = Color.rgb(22, 32, 51),
-        surface2 = Color.rgb(30, 42, 64),
-        stroke = Color.rgb(46, 61, 86),
-        text = Color.rgb(230, 237, 247),
-        muted = Color.rgb(154, 168, 191),
-        faint = Color.rgb(110, 124, 148),
-        accent = Color.rgb(56, 189, 248),    // sky / Rem blue
-        accentText = Color.rgb(8, 24, 40),
-        success = Color.rgb(52, 211, 153),
-        warning = Color.rgb(251, 191, 36),
-        danger = Color.rgb(248, 113, 113)
-    ) else Palette(
-        bg = Color.rgb(242, 245, 249),
-        surface = Color.rgb(255, 255, 255),
-        surface2 = Color.rgb(233, 238, 245),
-        stroke = Color.rgb(211, 219, 231),
-        text = Color.rgb(15, 27, 46),
-        muted = Color.rgb(91, 107, 130),
-        faint = Color.rgb(133, 148, 168),
-        accent = Color.rgb(2, 132, 199),
-        accentText = Color.rgb(255, 255, 255),
-        success = Color.rgb(5, 150, 105),
-        warning = Color.rgb(180, 120, 10),
-        danger = Color.rgb(200, 40, 40)
-    )
+    fun palette(ctx: Context): Palette {
+        val dark = isDark(ctx)
+        // v0.19.0 (play-iap): the accent pair comes from the chosen
+        // appearance theme (SgTheme; "Sky" = the original shipping
+        // accents, free forever). Surfaces, text, strokes and the
+        // semantic colours are theme-invariant. GuardService never
+        // calls this — the covers are painted from fixed literals
+        // there and keep full contrast under every theme.
+        val acc = SgTheme.accents(Prefs.themeKey(ctx), dark)
+        return if (dark) Palette(
+            bg = Color.rgb(11, 18, 32),          // ink navy
+            surface = Color.rgb(22, 32, 51),
+            surface2 = Color.rgb(30, 42, 64),
+            stroke = Color.rgb(46, 61, 86),
+            text = Color.rgb(230, 237, 247),
+            muted = Color.rgb(154, 168, 191),
+            faint = Color.rgb(110, 124, 148),
+            accent = acc.accent,
+            accentText = acc.accentText,
+            success = Color.rgb(52, 211, 153),
+            warning = Color.rgb(251, 191, 36),
+            danger = Color.rgb(248, 113, 113)
+        ) else Palette(
+            bg = Color.rgb(242, 245, 249),
+            surface = Color.rgb(255, 255, 255),
+            surface2 = Color.rgb(233, 238, 245),
+            stroke = Color.rgb(211, 219, 231),
+            text = Color.rgb(15, 27, 46),
+            muted = Color.rgb(91, 107, 130),
+            faint = Color.rgb(133, 148, 168),
+            accent = acc.accent,
+            accentText = acc.accentText,
+            success = Color.rgb(5, 150, 105),
+            warning = Color.rgb(180, 120, 10),
+            danger = Color.rgb(200, 40, 40)
+        )
+    }
 
     fun dp(ctx: Context, v: Int): Int = (v * ctx.resources.displayMetrics.density).toInt()
 

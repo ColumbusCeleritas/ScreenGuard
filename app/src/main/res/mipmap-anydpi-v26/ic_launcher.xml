@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- v0.19.0 (play-iap): adaptive icon derived from the approved
+     store art (play-icon-512.png). Background = the art's ink navy;
+     foreground = the shield+check keyed out of the art as raster
+     mipmaps (ic_launcher_foreground) at 80% scale inside the safe
+     zone. Raster, not vector: Play's pre-review/tester pages fall
+     back to the default robot for vector-only adaptive icons, and
+     the legacy ic_launcher / ic_launcher_round PNGs now ship in
+     every density bucket as well. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
 </adaptive-icon>

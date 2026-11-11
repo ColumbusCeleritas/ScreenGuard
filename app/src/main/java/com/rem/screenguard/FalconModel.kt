@@ -111,12 +111,38 @@ class FalconModel(ctx: Context, private val log: (String) -> Unit = {}) {
      * P(nsfw) for [bmp], which may be the full frame or the motion-region
      * crop — either way it is judged as a whole picture, exactly as the
      * bench rig judged whole pictures.
+     *
+     * v0.19.4 ownership contract: [owned] states who controls [bmp]'s
+     * lifetime. true = the caller hands over a bitmap nothing else will
+     * recycle while this call runs (the fast path: scale straight from
+     * it). false = [bmp] may be a createBitmap VIEW aliasing another
+     * bitmap that a different code path can recycle at any moment — the
+     * field incident behind this parameter: a full-bounds window crop
+     * (a view of the frame) was recycled by its owning path before the
+     * legacy pass scored it, and createScaledBitmap then threw
+     * "cannot use a recycled source in createBitmap", which the old
+     * latch treated as model corruption and disarmed FAL for days.
+     * With owned=false the model first materialises its own ARGB_8888
+     * copy and scales from THAT, so no createScaledBitmap ever runs on
+     * a bitmap whose lifetime this callee does not control.
+     *
+     * v0.19.6 extension: the contract also binds GuardService's OWN
+     * crop lifecycle — a crop that IS its source (full-bounds
+     * createBitmap returns the source itself) is never recycled by
+     * the crop's owner; every crop-recycle site identity-guards
+     * (`if (crop !== bmp)`) exactly as thumbnail() always did. The
+     * 2026-11-10 field log proved the gap: runWindowPass recycled a
+     * full-bounds window crop — the frame itself — mid-analysis,
+     * and that analysis's later region/zoom crops threw the same
+     * recycled-source error the model contract had already closed.
      */
-    fun score(bmp: Bitmap): Float {
-        val scaled = Bitmap.createScaledBitmap(bmp, INPUT, INPUT, true)
+    fun score(bmp: Bitmap, owned: Boolean): Float {
+        val src = if (owned) bmp else bmp.copy(Bitmap.Config.ARGB_8888, false)
+        val scaled = Bitmap.createScaledBitmap(src, INPUT, INPUT, true)
+        if (!owned) src.recycle()
         val pixels = IntArray(INPUT * INPUT)
         scaled.getPixels(pixels, 0, INPUT, 0, 0, INPUT, INPUT)
-        if (scaled !== bmp) scaled.recycle()
+        if (scaled !== src) scaled.recycle()
         val plane = INPUT * INPUT
         val input = FloatBuffer.allocate(3 * plane)
         // Bench rig: BGR→RGB (the rig reads BGR via OpenCV, so its channel

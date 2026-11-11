@@ -40,7 +40,10 @@ object Prefs {
     // pending (fixed 2 hits, 10 s warmth expiry) replaced the
     // machinery they tuned, so their keys are simply never read again.
     fun suspFal(ctx: Context): Float = get(ctx).getFloat("susp_fal", 0.40f) // suspicion warmth: either Falconsai pass
-    fun secureFrames(ctx: Context): Int = get(ctx).getInt("secure_frames_needed", 2)
+    // v0.19.0-sideload: secureFrames() REMOVED — the incognito
+    // corroboration count is code ground truth (GuardService
+    // .SECURE_FRAMES_NEEDED); the settings-era secure_frames_needed
+    // key is deleted at every service start and never read again.
     fun attentionMs(ctx: Context): Long = get(ctx).getInt("attention_s", 3) * 1000L
     // v0.15.1 (Alejandro's correction, 2026-10-31): quarantine duration
     // is app BEHAVIOUR, not a user setting. The small ladder values of
@@ -84,6 +87,33 @@ object Prefs {
     // switch both write this key.
     fun scoreDots(ctx: Context): Boolean = get(ctx).getBoolean("score_dots", true)
     fun setScoreDots(ctx: Context, v: Boolean) { get(ctx).edit().putBoolean("score_dots", v).apply() }
+
+    // ---- v0.19.0 (play-iap): appearance theme + Supporter Pack ----
+    // ui_theme is a pure display preference (see SgTheme). The
+    // supporter flag is a CACHE of the last successful Play Billing
+    // entitlement query — written ONLY by BillingRepository after
+    // Play answers (a successful query writes it either way, so a
+    // refund un-entitles; see SupporterGate). Nothing in protection
+    // reads either key.
+    fun themeKey(ctx: Context): String =
+        get(ctx).getString("ui_theme", SgTheme.DEFAULT_KEY) ?: SgTheme.DEFAULT_KEY
+
+    fun setThemeKey(ctx: Context, key: String) {
+        get(ctx).edit().putString("ui_theme", key).apply()
+    }
+
+    fun supporterCached(ctx: Context): Boolean =
+        get(ctx).getBoolean("supporter_entitled", false)
+
+    fun supporterVerifiedTs(ctx: Context): Long =
+        get(ctx).getLong("supporter_verified_ts", 0L)
+
+    fun setSupporterCached(ctx: Context, entitled: Boolean) {
+        get(ctx).edit()
+            .putBoolean("supporter_entitled", entitled)
+            .putLong("supporter_verified_ts", System.currentTimeMillis())
+            .apply()
+    }
 
     // ---- v0.9.0: protection levels (Alejandro) ----
     // Gentle / Balanced / Strict are deliberately CLOSE bundles — small

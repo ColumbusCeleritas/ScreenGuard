@@ -153,8 +153,7 @@ class CustomActivity : Activity() {
                 "0.75+ = 1, under 0.60 = −1; 8 points blocks). Fixed by design — no sliders.")
 
         header("Incognito",
-            "Capture-proof browser windows read as black. The guard blocks the mode itself after this many such frames.")
-        intRow("Incognito frames to block", "secure_frames_needed", 1, 4, Prefs.secureFrames(this), " frames", "")
+            "Capture-proof browser windows composite as pure black — every pixel exactly 0, uniformly, edge to edge. The guard blocks the mode itself after 2 such frames in a row. A merely dark page (X in dark mode, a dark video) always emits some pixel, so it never counts. Fixed by design — like the quarantine ladder, this count is code, not a setting.")
 
         header("Cadence & battery",
             "Idle check rates. Any suspicious frame bursts to maximum cadence at once, so idle rates cost no protection.")

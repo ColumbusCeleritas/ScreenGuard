@@ -24,11 +24,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.rem.screenguard"
+        applicationId = "com.columbusceleritas.screenguard"
         minSdk = 30          // Android 11: first version with AccessibilityService.takeScreenshot()
         targetSdk = 36
-        versionCode = 78
-        versionName = "0.18.0"
+        versionCode = 85
+        versionName = "0.19.6"
         // PoC fleet is arm64 only (OnePlus 13, Galaxy): drops the x86/x86_64/armeabi
         // ONNX Runtime libraries and shrinks the APK from ~87 MB to ~36 MB.
         ndk {
@@ -84,4 +84,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     // ONNX Runtime for Android (CPU by default; NNAPI optional in code)
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.21.1")
+    // v0.19.0 (play-iap): Play Billing for the Supporter Pack (themes
+    // only — protection is never sold). App module only; the models
+    // asset pack is untouched. Version = the latest stable on Google
+    // Maven at build time (metadata <release> 9.1.0, 2026-06-18).
+    implementation("com.android.billingclient:billing:9.1.0")
 }

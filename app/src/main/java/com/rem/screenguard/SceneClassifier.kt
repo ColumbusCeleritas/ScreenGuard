@@ -69,9 +69,19 @@ class SceneClassifier(ctx: Context) {
         inputName = session.inputNames.iterator().next()
     }
 
-    /** P(unsafe) for [bitmap], 0..1. Throws on inference failure. */
-    fun classify(bitmap: Bitmap): Float {
-        val scaled = Bitmap.createScaledBitmap(bitmap, INPUT, INPUT, true)
+    /**
+     * P(unsafe) for [bitmap], 0..1. Throws on inference failure.
+     *
+     * v0.19.4 ownership contract (mirrors FalconModel.score): [owned]
+     * states who controls [bitmap]'s lifetime. true = fast path, scale
+     * straight from it. false = [bitmap] may be a createBitmap VIEW of
+     * a bitmap another path can recycle at any moment — materialise an
+     * owned ARGB_8888 copy first and scale from that, so no
+     * createScaledBitmap ever runs on an unowned bitmap.
+     */
+    fun classify(bitmap: Bitmap, owned: Boolean): Float {
+        val src = if (owned) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, false)
+        val scaled = Bitmap.createScaledBitmap(src, INPUT, INPUT, true)
         try {
             val px = IntArray(INPUT * INPUT)
             scaled.getPixels(px, 0, INPUT, 0, 0, INPUT, INPUT)
@@ -95,7 +105,8 @@ class SceneClassifier(ctx: Context) {
                 tensor.close()
             }
         } finally {
-            if (scaled !== bitmap) scaled.recycle()
+            if (scaled !== src) scaled.recycle()
+            if (!owned) src.recycle()
         }
     }
 

@@ -60,6 +60,15 @@
             android:name=".TextInfoActivity"
             android:exported="false" />
 
+        <!-- v0.19.0 (play-iap): the theme picker + Supporter Pack
+             purchase entry. The BILLING permission itself is merged
+             from the Play Billing Library's manifest; this app still
+             deliberately requests no INTERNET permission — purchases
+             run through the Play Store app, not this process. -->
+        <activity
+            android:name=".ThemesActivity"
+            android:exported="false" />
+
         <activity
             android:name=".LogActivity"
             android:exported="false" />

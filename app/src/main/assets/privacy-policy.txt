@@ -18,8 +18,9 @@ What ScreenGuard accesses
 How that access is used — and its limits
 
 - Screenshots are analysed only on your device, in memory, by two machine-learning models stored on the device, to decide whether adult content is on screen. If it is, ScreenGuard covers the screen and, in some cases, returns to the Home screen.
-- Screenshots are never saved, never stored, and never leave the device. ScreenGuard has no permission to access the internet and contains no code that transmits data anywhere.
+- Screenshots are never saved, never stored, and never leave the device. ScreenGuard has no permission to access the internet and contains no code that sends data anywhere on its own.
 - ScreenGuard keeps one record on the device: a local event log containing the time of each check event, the foreground app's package name, and the detector's verdict and score. No screenshot, image, or screen text is ever written to this log. The log stays on the device, is visible to you in the app, and is deleted when you clear the app's data or uninstall it.
+- The app has a Share / Export log button. Only if you tap it does the event log (times, app package names and detector scores — never screenshots or screen content) leave the device, to the destination you choose. ScreenGuard never sends anything on its own.
 - Your settings (protection options you choose in the app) are stored only on the device.
 
 What ScreenGuard does not do

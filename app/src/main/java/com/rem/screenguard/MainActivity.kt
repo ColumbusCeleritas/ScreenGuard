@@ -48,6 +48,11 @@ class MainActivity : Activity() {
     private lateinit var unlockBtn: Button
     private lateinit var cancelUnlockBtn: Button
     private val gatedViews = mutableListOf<View>()
+    // v0.19.0 (play-iap): Appearance card status line + the theme
+    // this instance was built with (onResume recreates if the picker
+    // changed it underneath us, so the new palette applies).
+    private lateinit var themeTv: TextView
+    private var createdTheme: String = ""
     // Play prominent disclosure (priority 5): the Home card that
     // re-triggers DisclosureActivity until consent is recorded.
     private lateinit var disclosureCard: LinearLayout
@@ -65,6 +70,11 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        createdTheme = Prefs.themeKey(this)
+        // v0.19.0: Supporter Pack entitlement is re-queried from Play
+        // on every app start. Themes only — a billing failure changes
+        // nothing else (see BillingRepository's isolation note).
+        BillingRepository.refresh(this)
         val p = SgUi.palette(this)
 
         window.statusBarColor = p.bg
@@ -416,16 +426,22 @@ class MainActivity : Activity() {
         gatedViews.add(clearBtn)
         root.addView(diagCard)
 
-        // ---- Event log ----
-        val logCard = SgUi.card(this)
-        logCard.addView(SgUi.cardTitle(this, "Event log"))
-        logCard.addView(SgUi.body(this,
-            "Latest first · warnings and blocks only — full detail is in the debug log.", 12.5f).apply {
-            setPadding(0, 0, 0, SgUi.dp(this@MainActivity, 6))
+        // ---- Appearance & Supporter Pack (v0.19.0, play-iap) ----
+        // Display only, and — like Diagnostics — deliberately NOT
+        // lock-gated: a theme weakens nothing. Sky is free; the five
+        // supporter themes are the one thing ScreenGuard sells.
+        val themeCard = SgUi.card(this)
+        themeCard.addView(SgUi.cardTitle(this, "Appearance"))
+        themeTv = SgUi.text(this, "", 15f, p.text)
+        themeCard.addView(themeTv)
+        themeCard.addView(SgUi.body(this,
+            "Accent themes for these screens. Protection is free and identical for everyone.", 13.5f).apply {
+            setPadding(0, dp(6), 0, 0)
         })
-        logTv = SgUi.text(this, "", 12.5f, p.muted, mono = true)
-        logCard.addView(logTv)
-        root.addView(logCard)
+        themeCard.addView(SgUi.secondaryButton(this, "Themes…") {
+            startActivity(Intent(this@MainActivity, ThemesActivity::class.java))
+        })
+        root.addView(themeCard)
 
         // ---- Privacy & open source (Play G3 remainder, 2026-11-02) ----
         // In-app privacy-policy text/link and the in-app licences
@@ -449,6 +465,20 @@ class MainActivity : Activity() {
                 .putExtra(TextInfoActivity.EXTRA_KIND, TextInfoActivity.KIND_LICENCES))
         })
         root.addView(infoCard)
+
+        // ---- Event log (v0.19.3: moved to the BOTTOM of Home at
+        // Alejandro's request, below Appearance and Privacy; the card
+        // block only — the "Clear debug log + event log" button stays
+        // in Diagnostics above, its wiring unchanged) ----
+        val logCard = SgUi.card(this)
+        logCard.addView(SgUi.cardTitle(this, "Event log"))
+        logCard.addView(SgUi.body(this,
+            "Latest first · warnings and blocks only — full detail is in the debug log.", 12.5f).apply {
+            setPadding(0, 0, 0, SgUi.dp(this@MainActivity, 6))
+        })
+        logTv = SgUi.text(this, "", 12.5f, p.muted, mono = true)
+        logCard.addView(logTv)
+        root.addView(logCard)
 
         val scroll = ScrollView(this).apply {
             setBackgroundColor(p.bg)
@@ -477,7 +507,13 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onResume() { super.onResume(); ui.post(refresh) }
+    override fun onResume() {
+        super.onResume()
+        // v0.19.0: the palette was read at onCreate; if the theme
+        // changed while Home sat under the picker, rebuild with it.
+        if (Prefs.themeKey(this) != createdTheme) { recreate(); return }
+        ui.post(refresh)
+    }
     override fun onPause() { super.onPause(); ui.removeCallbacks(refresh) }
 
     @Deprecated("plain-Activity PoC; no appcompat activity-result contracts")
@@ -642,6 +678,13 @@ class MainActivity : Activity() {
                 "Running as: ${Prefs.rungName(effR).replaceFirstChar { it.uppercase() }} ($why)"
             } else ""
         }
+        if (::themeTv.isInitialized) {
+            val theme = SgTheme.current(this)
+            themeTv.text = SgUi.labelValue(
+                this, "Theme",
+                theme.name + if (SupporterGate.entitled(this)) " · Supporter Pack owned" else ""
+            )
+        }
         val log = Prefs.log(this)
         logTv.text = if (log.isBlank()) "(no events yet)" else log.split("\n").reversed().joinToString("\n")
         refreshLockUi()
@@ -658,7 +701,7 @@ class MainActivity : Activity() {
         sb.append("• Testing (ground truth): while the debug overlay is on, a small GT button floats at the bottom corner — tap it the moment explicit content appears (it turns red) and tap again when it is gone. Each marked stretch is logged as GT START / GT END with the models' peak readings and timings, so test sessions can be scored exactly. It never affects blocking\n")
         sb.append("• App previews: the app previews in Recents are also checked; a hit there just sends you Home briefly — the launcher itself is never locked or timed out. A proven hit there also opens Paranoid mode for 5 minutes: while it runs, the Home screen is checked every second and ANY reading of 0.30+ from either model — not just proof-grade readings — sends you Home with the 3 s cover again, so the previews cannot simply be watched between covers. Other apps are unaffected, and the 5 minutes never extends unless explicit content is proven there again\n")
         if (Prefs.blockSecure(this)) {
-            sb.append("• Incognito: a capture-proof browser window on ${Prefs.secureFrames(this)} frames blocks the mode itself\n")
+            sb.append("• Incognito: a capture-proof browser window — pure black, every pixel exactly 0 — on 2 frames blocks the mode itself; a merely dark page never counts\n")
         }
         sb.append("After a block the app is closed and timed out: ${Prefs.quarBaseSec(this)}s, doubling per repeat to a ${Prefs.quarMaxSec(this)}s cap; the level resets after ${Prefs.quarResetMs(this) / 60000} clean minutes. And for 3 minutes after any block, suspicion mode runs in EVERY app — checks every 1 s, the region finder on the same ~1 s capture rhythm — so switching apps buys no quiet window.\n")
         sb.append("Checks run every ${Prefs.riskyIntervalMs(this) / 1000}s in suspicious apps (browsers, social, video, chat), ${Prefs.normalIntervalMs(this) / 1000}s in other apps — Instagram counts as an other app — and every ${Prefs.systemIntervalMs(this) / 1000}s in system apps (dialer, clock, calculator, contacts: sanity checks only, and anything suspicious there restores full cadence at once); any suspicious frame bursts to maximum cadence for ${Prefs.attentionMs(this) / 1000}s. If this phone cannot sustain the chosen rate, ScreenGuard slows its idle checks on its own (and a 2-minute benchmark can measure the right level up front) — suspicion bursts always stay at full speed. Settings, system UI and ScreenGuard's own screens get a sanity check at the system rate — never more than 60 s apart — and can trip suspicion but can never be blocked; the launcher is checked (for Recents previews) but never locked.")

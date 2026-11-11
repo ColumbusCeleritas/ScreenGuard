@@ -49,7 +49,7 @@ GNU General Public License v3.0 (see `LICENSE`).
 
 The two ONNX model files are **not in git** — one of them exceeds
 GitHub's 100 MB per-file limit. They are attached as assets to the
-**v0.18.0 release** of this repository, together with a `SHA256SUMS`
+**v0.19.6 release** of this repository, together with a `SHA256SUMS`
 file:
 
 - `falconsai.onnx` (343,401,688 bytes) — SHA-256
@@ -77,8 +77,8 @@ Full provenance and licence details for every component are in
 - `play` (default) — the Google Play line: compile/target SDK 36,
   ONNX Runtime 1.21.1, models delivered in an install-time asset pack,
   prominent-disclosure consent flow, in-app privacy policy and
-  open-source licences screens. Current build: versionCode 78,
-  version 0.18.0.
+  open-source licences screens. Current build: versionCode 85,
+  version 0.19.6.
 - `master` — the sideload line: compile/target SDK 34, models bundled
   in the app assets. This line's APK (debug-signed) is the
   `sg-v0180.apk` asset on the v0.18.0 release.
