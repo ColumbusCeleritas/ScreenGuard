@@ -27,6 +27,14 @@ GNU General Public License v3.0 (see `LICENSE`).
   not switch protection off.
 - Judging pauses while a voice or video call is on screen, and the
   device's launcher is never blocked.
+- The app keeps an accountability record on the device: install and
+  update times, every accessibility off and on with the blind window
+  between them, and per-app block counts. The user can render it as a
+  report image and share it with an accountability partner; the app
+  itself sends nothing. Once accessibility is granted, the in-app
+  shortcut to the accessibility settings is hidden, so turning
+  protection off is a deliberate trip through Android Settings — and
+  it is on the record.
 - Check frequency is adjustable by app tier, with a built-in phone
   benchmark and a capture-health governor that keep the rate at one
   the phone can sustain.
@@ -38,10 +46,13 @@ GNU General Public License v3.0 (see `LICENSE`).
 - Screenshots are never saved, never stored, and never leave the
   device. No accounts, no advertising, no analytics, no crash
   reporting, no third-party tracking.
-- The only record kept is a local event log on the device: the time of
+- The records kept are local to the device: an event log (the time of
   each event, the foreground app's package name, and the detector's
-  verdict and score — never an image or screen text. You can read it in
-  the app and erase it by clearing the app's data.
+  verdict and score — never an image or screen text) and an
+  accountability record (install and update times, accessibility
+  off/on times, and per-app block counts). You can read both in the
+  app and erase them by clearing the app's data. The accountability
+  report leaves the device only if you choose to share it.
 - Privacy policy: https://columbusceleritas.com/privacy-policy/
 - Terms of service: https://columbusceleritas.com/terms-of-service/
 
@@ -49,7 +60,7 @@ GNU General Public License v3.0 (see `LICENSE`).
 
 The two ONNX model files are **not in git** — one of them exceeds
 GitHub's 100 MB per-file limit. They are attached as assets to the
-**v0.19.6 release** of this repository, together with a `SHA256SUMS`
+**v0.19.7 release** of this repository, together with a `SHA256SUMS`
 file:
 
 - `falconsai.onnx` (343,401,688 bytes) — SHA-256
@@ -77,8 +88,8 @@ Full provenance and licence details for every component are in
 - `play` (default) — the Google Play line: compile/target SDK 36,
   ONNX Runtime 1.21.1, models delivered in an install-time asset pack,
   prominent-disclosure consent flow, in-app privacy policy and
-  open-source licences screens. Current build: versionCode 85,
-  version 0.19.6.
+  open-source licences screens, accountability record and shareable
+  report. Current build: versionCode 86, version 0.19.7.
 - `master` — the sideload line: compile/target SDK 34, models bundled
   in the app assets. This line's APK (debug-signed) is the
   `sg-v0180.apk` asset on the v0.18.0 release.

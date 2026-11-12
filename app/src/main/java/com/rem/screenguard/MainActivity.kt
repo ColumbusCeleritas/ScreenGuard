@@ -2,6 +2,7 @@ package com.rem.screenguard
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -53,6 +54,16 @@ class MainActivity : Activity() {
     // changed it underneath us, so the new palette applies).
     private lateinit var themeTv: TextView
     private var createdTheme: String = ""
+    // v0.19.7 accountability (D1 + design §6): the Setup step-1
+    // shortcut, hidden once accessibility is granted and replaced by
+    // the ON row + the recording hint; the Accountability card's lines.
+    private lateinit var accBtn: Button
+    private lateinit var accOnTv: TextView
+    private lateinit var accOffHintTv: TextView
+    private lateinit var acctInstalledTv: TextView
+    private lateinit var acctStateTv: TextView
+    private lateinit var acctWeekTv: TextView
+    private lateinit var acctEventsTv: TextView
     // Play prominent disclosure (priority 5): the Home card that
     // re-triggers DisclosureActivity until consent is recorded.
     private lateinit var disclosureCard: LinearLayout
@@ -265,10 +276,21 @@ class MainActivity : Activity() {
         // Run 4: the Run 1–3 label wrapped to two lines inside the
         // primary button (taller than every other button on Home).
         // Shortened — same step, same destination, one line.
-        setupCard.addView(SgUi.primaryButton(this,
+        accBtn = SgUi.primaryButton(this,
             "1 ·  Enable ScreenGuard accessibility") {
             openAccessibilityOrDisclosure()
-        })
+        }
+        setupCard.addView(accBtn)
+        // v0.19.7 (D1, B1 folded in): the shortcut joins the settings-
+        // lock freeze, and once accessibility is granted refreshUi
+        // hides it entirely — the one-tap jump to the very settings
+        // screen that can silence the guard disappears, replaced by
+        // this status row. Turning the guard off stays possible, just
+        // deliberate: Android Settings, by hand (see the hint under
+        // this card). DisclosureActivity's consent path is untouched.
+        gatedViews.add(accBtn)
+        accOnTv = SgUi.text(this, "Accessibility: ON", 15.5f, p.success, bold = true)
+        setupCard.addView(accOnTv)
         setupCard.addView(SgUi.secondaryButton(this,
             "2 ·  Exclude from battery optimisation") {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
@@ -293,6 +315,39 @@ class MainActivity : Activity() {
         })
         setupCard.addView(SgUi.hint(this, "Finds the fastest protection level this phone can sustain. Optional — the guard adapts on its own if a phone struggles."))
         root.addView(setupCard)
+        // v0.19.7 (D1): the honest hint, shown once granted — the way
+        // out is named, and so is the fact that it is recorded.
+        accOffHintTv = SgUi.hint(this,
+            "To turn ScreenGuard off, use Android Settings → Accessibility. Every off and on is recorded — see Accountability below.")
+        root.addView(accOffHintTv)
+
+        // ---- Accountability (v0.19.7, design §6) ----
+        // Deliberately NOT lock-gated: reading the record, and sharing
+        // it with a partner, weakens nothing.
+        val acctCard = SgUi.card(this)
+        acctCard.addView(SgUi.cardTitle(this, "Accountability"))
+        acctCard.addView(SgUi.body(this,
+            "An on-device record of installs, accessibility off/on times and blocks. " +
+                "It never leaves this phone unless you share the report yourself."))
+        acctInstalledTv = SgUi.body(this, "")
+        acctCard.addView(acctInstalledTv)
+        acctStateTv = SgUi.body(this, "")
+        acctCard.addView(acctStateTv)
+        acctWeekTv = SgUi.body(this, "")
+        acctCard.addView(acctWeekTv)
+        acctEventsTv = SgUi.text(this, "", 12.5f, p.muted, mono = true)
+        acctCard.addView(acctEventsTv)
+        acctCard.addView(SgUi.primaryButton(this, "Share accountability report…") {
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle("Share accountability report")
+                .setItems(arrayOf("Last 7 days", "Last 30 days", "Last 90 days")) { _, which ->
+                    AccountabilityReport.shareReport(
+                        this@MainActivity, intArrayOf(7, 30, 90)[which]
+                    )
+                }
+                .show()
+        })
+        root.addView(acctCard)
 
         // ---- Settings lock (v0.5.0 semantics preserved verbatim) ----
         val lockCard = SgUi.card(this)
@@ -509,6 +564,10 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // v0.19.7: reconcile the accountability ledger against the
+        // live accessibility state (catches callback-less deaths and
+        // settings changes made while Home was away).
+        Accountability.reconcile(this, false)
         // v0.19.0: the palette was read at onCreate; if the theme
         // changed while Home sat under the picker, rebuild with it.
         if (Prefs.themeKey(this) != createdTheme) { recreate(); return }
@@ -590,9 +649,44 @@ class MainActivity : Activity() {
             else
                 "3 ·  Allow notifications (shield icon)"
         }
+        // v0.19.7: one read of the live accessibility state drives the
+        // hero line (text unchanged), the D1 shortcut swap and the
+        // Accountability card.
+        val svcOn = isServiceEnabled()
+        if (::accBtn.isInitialized) {
+            accBtn.visibility = if (svcOn) View.GONE else View.VISIBLE
+            accOnTv.visibility = if (svcOn) View.VISIBLE else View.GONE
+            accOffHintTv.visibility = if (svcOn) View.VISIBLE else View.GONE
+        }
+        if (::acctInstalledTv.isInitialized) {
+            val (inst, upd) = Accountability.installInfo(this)
+            acctInstalledTv.text = buildString {
+                append("Installed: ").append(Accountability.fmtDate(inst))
+                if (upd > inst) append(" · Updated: ").append(Accountability.fmtDate(upd))
+            }
+            val onSince = Accountability.onSinceWall(this)
+            val offSince = Accountability.offSinceWall(this)
+            acctStateTv.text = when {
+                svcOn && onSince > 0 ->
+                    "Accessibility: ON since " + Accountability.fmtDateTime(onSince)
+                svcOn -> "Accessibility: ON"
+                offSince > 0 ->
+                    "Accessibility: OFF since " + Accountability.fmtDateTime(offSince) +
+                        " — protection is blind"
+                else -> "Accessibility: OFF — protection is blind"
+            }
+            val nowMs = System.currentTimeMillis()
+            val wk = Accountability.stats(this, nowMs - 7L * 24 * 60 * 60 * 1000, nowMs)
+            acctWeekTv.text = "This week: ${wk.blocks} blocks · ${wk.blindCount} blind windows " +
+                "(${Accountability.fmtDur(wk.blindMs)}) · ${wk.interruptionCount} interruptions"
+            val recent = Accountability.displayItems(this).takeLast(10).asReversed()
+            acctEventsTv.text =
+                if (recent.isEmpty()) "(no events yet)"
+                else recent.joinToString("\n") { it.line }
+        }
         val p = Prefs.get(this)
         val sb = StringBuilder()
-        sb.append("Accessibility service: ").append(if (isServiceEnabled()) "ON" else "OFF (turn it on in Setup, step 1)").append("\n")
+        sb.append("Accessibility service: ").append(if (svcOn) "ON" else "OFF (turn it on in Setup, step 1)").append("\n")
         sb.append("Model loaded: ").append(if (p.getBoolean("model_ok", false)) "yes (Falconsai)" else "not yet / failed").append("\n")
         // v0.11.0: the FAL latch state on Home (the v0.10.3 FP pattern) —
         // a latched-off model must be visible here, not only in a log

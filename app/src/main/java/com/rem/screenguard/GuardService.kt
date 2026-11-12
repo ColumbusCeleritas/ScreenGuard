@@ -1459,6 +1459,10 @@ class GuardService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        // v0.19.7 accountability: reconcile the ledger FIRST — the ON
+        // timestamp (or a GAP pair for a callback-less death) belongs
+        // before any session bookkeeping resets.
+        Accountability.reconcile(this, serviceConnecting = true)
         Prefs.appendLog(this, ts() + " service connected, loading model…")
         DebugLog.log(this, "SVC connected (v0.7.0 verbose=${Prefs.verbose(this)})")
         // Fresh counters for this diagnostic session.
@@ -1681,7 +1685,17 @@ class GuardService : AccessibilityService() {
 
     override fun onInterrupt() {}
 
+    // v0.19.7 accountability: the user toggling the service OFF in
+    // Settings unbinds it — record the blind window's opening edge
+    // synchronously (commit()) inside the ledger. Writing it later, or
+    // trusting a poll, would lose it exactly when it matters.
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        Accountability.recordServiceOff(this)
+        return super.onUnbind(intent)
+    }
+
     override fun onDestroy() {
+        Accountability.recordServiceOff(this) // v0.19.7: same OFF edge, whichever callback fires
         running = false
         syncStatusNotification() // v0.12.1: shield leaves with the service
         mainHandler.removeCallbacks(scoutRunnable) // v0.11.2
@@ -3948,6 +3962,7 @@ class GuardService : AccessibilityService() {
         if (nowHb - lastHeartbeatMs > 15_000L) {
             lastHeartbeatMs = nowHb
             heartbeatSeen = true // v0.13.0: governor warm-up bookkeeping
+            Accountability.recordHeartbeat(this) // v0.19.7: persist the last-alive anchor for GAP detection
             // v0.11.13: capture health rides the heartbeat — attempts /
             // successes across BOTH capture consumers, failures split
             // with code 3 (INTERVAL_TIME_SHORT) named separately, and
@@ -6832,6 +6847,7 @@ class GuardService : AccessibilityService() {
             DebugLog.log(this, "LAUNCHER GUARD pkg=$pkg — content in previews → home + 3s cover (no cooldown)")
             Prefs.appendLog(this, ts() + " LAUNCHER GUARD $pkg — explicit content detected in app previews; sent Home, 3s cover, no cooldown")
             launcherGuardCount++ // v0.11.12: processFrame reads this to tell a same-frame conviction from a hair-trigger frame
+            Accountability.recordGuard(this, pkg) // v0.19.7: launcher-guard events are their own ledger kind (D5)
             // v0.11.12 PARANOID MODE (Alejandro's design): a
             // conviction on this surface — explicit content proven
             // where no quarantine can ever apply — opens (or
@@ -6856,6 +6872,11 @@ class GuardService : AccessibilityService() {
         resetCropAcc() // v0.10.9: any block, any source, empties the crop accumulator
         blocks++
         Prefs.putStatus(this, "blocks", blocks)
+        // v0.19.7 accountability: THE per-app counting point — TEST
+        // blocks never reach executeBlock, refusals (call hold) return
+        // before the counter, warn-only never blocks; secure mirrors
+        // the secure_blocks bump below.
+        Accountability.recordBlock(this, pkg, secure, enforce)
         if (secure) Prefs.bump(this, "secure_blocks")
         cooldownUntilMs = System.currentTimeMillis() + BLOCK_BLIND_MS
         // v0.11.10: arm (or re-arm) the global post-block SUS window

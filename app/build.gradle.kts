@@ -27,8 +27,8 @@ android {
         applicationId = "com.columbusceleritas.screenguard"
         minSdk = 30          // Android 11: first version with AccessibilityService.takeScreenshot()
         targetSdk = 36
-        versionCode = 85
-        versionName = "0.19.6"
+        versionCode = 86
+        versionName = "0.19.7"
         // PoC fleet is arm64 only (OnePlus 13, Galaxy): drops the x86/x86_64/armeabi
         // ONNX Runtime libraries and shrinks the APK from ~87 MB to ~36 MB.
         ndk {
