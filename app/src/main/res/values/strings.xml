@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ScreenGuard</string>
+    <string name="service_description">ScreenGuard watches the screen on-device for adult content and closes the app if it is detected. Nothing leaves this phone: the app has no internet permission and never saves screenshots.</string>
+</resources>
