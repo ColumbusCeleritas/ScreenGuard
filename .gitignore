@@ -1,0 +1,16 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# v0.11.0: the 343 MB Falconsai weights are placed into the build tree by the
+# build machine (downloaded from HuggingFace + hash-verified there) and are
+# never committed to git or routed through the dev VM.
+app/src/main/assets/falconsai.onnx
+# play branch: on the Play line the weights live in the asset pack instead.
+assetpack-models/src/main/assets/falconsai.onnx
